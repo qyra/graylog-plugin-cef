@@ -16,9 +16,7 @@ public class CEFParser {
      *   - benchmark regex
      */
 
-    //This is the master version
-    //private static final Pattern HEADER_PATTERN = Pattern.compile("^<\\d+>([a-zA-Z]{3}\\s+\\d{1,2} \\d{1,2}:\\d{1,2}:\\d{1,2}) CEF:(\\d+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)(?:$|(msg=.+))", Pattern.DOTALL);
-    private static final Pattern HEADER_PATTERN = Pattern.compile("(?:^<\\d+>([a-zA-Z]{3} \\d{1,2} \\d{1,2}:\\d{1,2}:\\d{1,2}).*|^)CEF:(\\d+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)(?:$| (msg=.+))", Pattern.DOTALL);
+    private static final Pattern HEADER_PATTERN = Pattern.compile("(?:^<\\d+>([a-zA-Z]{3}\\s+\\d{1,2} \\d{1,2}:\\d{1,2}:\\d{1,2}).*|^)CEF:(\\d+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)\\|(.+?)(?:$| (msg=.+))", Pattern.DOTALL);
     private static final DateTimeFormatter TIMESTAMP_PATTERN = DateTimeFormat.forPattern("MMM dd HH:mm:ss");
 
     private static final CEFFieldsParser FIELDS_PARSER = new CEFFieldsParser();
@@ -27,6 +25,34 @@ public class CEFParser {
 
     public CEFParser(DateTimeZone timezone) {
         this.timezone = timezone;
+    }
+
+    public int parseSeverity(String severity_string){
+        int retVal = 0;
+        try {
+            retVal = Integer.valueOf(severity_string);
+            if (retVal < -1 || retVal > 10){
+                throw new IllegalArgumentException(severity_string + " is not a valid severity (should be in 0..10)");
+            }
+            
+        } catch (NumberFormatException e) {
+            //Conver to lowercase, remove whitespace
+            String lowered = severity_string.toLowerCase();
+            if (lowered.equals("low")){
+                retVal = 3;
+            } else if (lowered.equals("med") || lowered.equals("medium")){
+                retVal = 6;
+            } else if (lowered.equals("high")){
+                retVal = 8;
+            } else if (lowered.equals("very high") || lowered.equals("very-high")){
+                retVal = 10;
+            } else if (lowered.equals("unknown")){
+                retVal = -1;
+            } else {
+                throw new IllegalArgumentException(severity_string + " is not a valid string or numeric severity - " + e.getMessage());
+            }
+        }
+        return retVal;
     }
 
     public CEFMessage parse(String x) throws ParserException {
@@ -53,7 +79,10 @@ public class CEFParser {
             builder.deviceVersion(m.group(5));
             builder.deviceEventClassId(m.group(6));
             builder.name(m.group(7));
-            builder.severity(Integer.valueOf(m.group(8)));
+            
+            String severity_string = m.group(8);
+            int numeric_severity = parseSeverity(severity_string);
+            builder.severity(numeric_severity);
 
             // Parse and add all CEF fields.
             String fieldsString = m.group(9);
