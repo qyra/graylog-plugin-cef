@@ -93,12 +93,12 @@ public class CEFParser {
         return tokens;
     }
 
-    public int parseSeverity(String severity_string){
+    public int parseSeverity(String severity_string) throws ParserException{
         int retVal = 0;
         try {
             retVal = Integer.valueOf(severity_string);
             if (retVal < -1 || retVal > 10){
-                throw new IllegalArgumentException(severity_string + " is not a valid severity (should be in 0..10)");
+                throw new ParserException(severity_string + " is not a valid severity");
             }
             
         } catch (NumberFormatException e) {
@@ -115,14 +115,42 @@ public class CEFParser {
             } else if (lowered.equals("unknown")){
                 retVal = -1;
             } else {
-                throw new IllegalArgumentException(severity_string + " is not a valid string or numeric severity - " + e.getMessage());
+                throw new ParserException(severity_string + " is not a valid string or numeric severity - " + e.getMessage());
             }
         }
         return retVal;
     }
 
-    private static final Pattern HEADER_REGEX = Pattern.compile("(?:^<\\d+>([a-zA-Z]{3}\\s+\\d{1,2} \\d{1,2}:\\d{1,2}:\\d{1,2}).*|^)CEF:(\\d+?)", Pattern.DOTALL);
-    private static final Pattern EXTENSION_REGEX =Pattern.compile("(.+?)(?:$| (msg=.+))", Pattern.DOTALL);
+    //We need the three parts of a date, and the cef version.
+    //<132>    Aug    14       14:26:55           ossec-host    CEF:0
+    //becomes the following four groups: ["Aug", "14", "14:26:55", "0"]
+    private static final Pattern HEADER_REGEX = Pattern.compile(
+        "(?:^<\\d+>\\s*([a-zA-Z]{3})\\s+(\\d{1,2})\\s+(\\d{1,2}:\\d{1,2}:\\d{1,2}).*|^)CEF:(\\d+?)", 
+        Pattern.DOTALL);
+    
+    private DateTime matchToDate(Matcher m){
+        String [] validTokens = new String[3];
+        StringBuffer buff = new StringBuffer();
+        
+        for (int i = 1; i<4; i++){
+            if (m.group(i) == null || m.group(i).isEmpty()) {
+                //Can't parse a date, giving up and using current date.
+                return DateTime.now(timezone);
+            } else if (i == 1){
+                buff.append(m.group(i));
+            } else {
+                buff.append(" ");
+                buff.append(m.group(i));
+            }
+        }
+        
+        String dateStr = buff.toString();
+        DateTime res = DateTime.parse(dateStr, TIMESTAMP_PATTERN)
+                    .withYear(DateTime.now(timezone).getYear())
+                    .withZoneRetainFields(timezone);
+
+        return res;
+    }
     
     public CEFMessage parse(String x) throws ParserException {
         ArrayList<String> tokens = pipeSplit(x);
@@ -142,23 +170,9 @@ public class CEFParser {
         Matcher headerMatch = HEADER_REGEX.matcher(headerString);
 
         if(headerMatch.find()) {
-            //The header contains:
-            //Group1 - the date [optional]
-            //Group2 - the CEF version.
-            
-            //Fill in the current if no date header exists.
-            DateTime timestamp;
-            if (headerMatch.group(1) == null || headerMatch.group(1).isEmpty()) {
-                // no syslog timestamp, using current time
-                timestamp = DateTime.now(timezone);
-            } else {
-                timestamp = DateTime.parse(headerMatch.group(1), TIMESTAMP_PATTERN)
-                        .withYear(DateTime.now(timezone).getYear())
-                        .withZoneRetainFields(timezone);
-            }
-
+            DateTime timestamp = matchToDate(headerMatch);
             builder.timestamp(timestamp);
-            builder.version(Integer.valueOf(headerMatch.group(2)));
+            builder.version(Integer.valueOf(headerMatch.group(4)));
         } else {
             throw new ParserException("This message was not recognized as CEF and could not be parsed.");
         }

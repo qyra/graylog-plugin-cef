@@ -92,7 +92,7 @@ public class CEFFieldsParser {
         try {
             fields = fieldsBuilder.build();
         } catch(IllegalArgumentException e) {
-            LOG.warn("Skipping malformed CEF message. Multiple keys with same name?");
+            LOG.warn("Skipping malformed CEF message [" + x + "]. Multiple keys with same name?");
             return null;
         }
 
