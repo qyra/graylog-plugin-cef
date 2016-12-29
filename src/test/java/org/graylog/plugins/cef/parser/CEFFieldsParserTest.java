@@ -2,6 +2,8 @@ package org.graylog.plugins.cef.parser;
 
 import autovalue.shaded.com.google.common.common.collect.ImmutableMap;
 import org.junit.Test;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 import static org.junit.Assert.*;
 
@@ -121,5 +123,74 @@ public class CEFFieldsParserTest {
         ImmutableMap<String, Object> r = p.parse("dvc=ip-172-30-2-212 eventId=9001 cs2=ip-172-30-2-212 -> /var/log/auth.log cs2Label=Location msg=Aug 14 14:26:53 ip-172-30-2-212 sshd[16217]: message repeated 2 times");
         assertEquals("ip-172-30-2-212 -> /var/log/auth.log", r.get("Location"));
     }
-
+    
+    @Test
+    public void testFieldAfterMessage() throws Exception {
+        CEFFieldsParser p = new CEFFieldsParser();
+        ImmutableMap<String, Object> r = p.parse("dvc=ip-172-30-2-212 eventId=9001 cs2=ip-172-30-2-212 -> /var/log/auth.log cs2Label=Location msg=Aug 14 14:26:53 ip-172-30-2-212 sshd[16217]: message repeated 2 times logname=name with spaces in it.txt uid=999");
+        assertEquals("name with spaces in it.txt", r.get("logname"));
+    }
+    
+    @Test
+    public void testIntFieldAfterMessage() throws Exception {
+        CEFFieldsParser p = new CEFFieldsParser();
+        ImmutableMap<String, Object> r = p.parse("dvc=ip-172-30-2-212 eventId=9001 cs2=ip-172-30-2-212 -> /var/log/auth.log cs2Label=Location msg=Aug 14 14:26:53 ip-172-30-2-212 sshd[16217]: message repeated 2 times logname=name with spaces in it.txt uid=999");
+        assertEquals(999, r.get("uid"));
+    }
+    
+    //Testing the split function directly
+    @Test
+    public void testFieldSplitShort() {
+        String input = "dvc=ip-172-30-2-212 cfp2=90.01";
+        String[] exp = {"dvc", "ip-172-30-2-212", "cfp2", "90.01"};
+        ArrayList<String> expected = new ArrayList<String>(Arrays.asList(exp));
+        ArrayList<String> result = CEFFieldsParser.fieldSplit(input);
+        assertEquals(expected, result);
+    }
+    
+    @Test
+    public void testFieldTrailingSpaces() {
+        //Only the last space before a key should be stripped. All other
+        //trailing whitespace belongs to the preceding value and should
+        //not be removed. (As per the official CEF specification)
+        //So 2 trailing spaces in the input-> 1 in the field value output, 3->2, etc.
+        String input = "dvc=ip-172-30-2-212   cfp2=90.01 cfp2Label=SomeFloat  spt=  22     cs2=ip-172-30-2-212->/var/log/auth.log cs2Label=Location msg=Aug 14 14:26:53 ip-172-30-2-212 sshd[16217]: PAM 2 more authentication failures; logname= uid=0 euid=0 tty=ssh ruser= rhost=8.8.8.8  user=root";
+        String[] exp = {"dvc", "ip-172-30-2-212  ", "cfp2", "90.01", "cfp2Label", "SomeFloat ", "spt", "  22    ", "cs2", "ip-172-30-2-212->/var/log/auth.log", "cs2Label", "Location", "msg", "Aug 14 14:26:53 ip-172-30-2-212 sshd[16217]: PAM 2 more authentication failures;", "logname", "", "uid", "0", "euid", "0",  "tty", "ssh", "ruser", "", "rhost", "8.8.8.8 ", "user", "root"};
+        ArrayList<String> expected = new ArrayList<String>(Arrays.asList(exp));
+        ArrayList<String> result = CEFFieldsParser.fieldSplit(input);
+        assertEquals(expected, result);
+    }
+    
+    @Test
+    public void testEscapedEquals() {
+        //Equals signs are allowed in field values, as long as they are
+        //escapes with a backslash.
+        String input = "dvc=ip-172-30-2-212  cfp2=90.01 cfp2Label=SomeFloat\\=  spt=22 cs2=ip-172-30-2-212->/var/log/auth.log cs2Label=Location msg=\\=Have some \\=escaped\\= equals!\\= logname= uid=0 euid=0 tty=ssh ruser= rhost=8.8.8.8  user=root";
+        String[] exp = {"dvc", "ip-172-30-2-212 ", "cfp2", "90.01", "cfp2Label", "SomeFloat= ", "spt", "22", "cs2", "ip-172-30-2-212->/var/log/auth.log", "cs2Label", "Location", "msg", "=Have some =escaped= equals!=", "logname", "", "uid", "0", "euid", "0",  "tty", "ssh", "ruser", "", "rhost", "8.8.8.8 ", "user", "root"};
+        ArrayList<String> expected = new ArrayList<String>(Arrays.asList(exp));
+        ArrayList<String> result = CEFFieldsParser.fieldSplit(input);
+        assertEquals(expected, result);
+    }
+    
+    @Test
+    public void testEscapedEscapeAtEnd() {
+        //Equals signs are allowed in field values, as long as they are
+        //escapes with a backslash.
+        String input = "dvc=ip-172-30-2-212  cfp2=90.01 cfp2Label=SomeFloat\\=  spt=22 cs2=ip-172-30-2-212->/var/log/auth.log cs2Label=Location msg=\\=Have some \\=escaped\\= equals!\\= logname= uid=0 euid=0 tty=ssh ruser= rhost=8.8.8.8  user=root\\\\";
+        String[] exp = {"dvc", "ip-172-30-2-212 ", "cfp2", "90.01", "cfp2Label", "SomeFloat= ", "spt", "22", "cs2", "ip-172-30-2-212->/var/log/auth.log", "cs2Label", "Location", "msg", "=Have some =escaped= equals!=", "logname", "", "uid", "0", "euid", "0",  "tty", "ssh", "ruser", "", "rhost", "8.8.8.8 ", "user", "root\\"};
+        ArrayList<String> expected = new ArrayList<String>(Arrays.asList(exp));
+        ArrayList<String> result = CEFFieldsParser.fieldSplit(input);
+        assertEquals(expected, result);
+    }
+    
+    @Test
+    public void testEscapedEqualsAtEnd() {
+        //Equals signs are allowed in field values, as long as they are
+        //escapes with a backslash.
+        String input = "dvc=ip-172-30-2-212  cfp2=90.01 cfp2Label=SomeFloat\\=  spt=22 cs2=ip-172-30-2-212->/var/log/auth.log cs2Label=Location msg=\\=Have some \\=escaped\\= equals!\\= logname= uid=0 euid=0 tty=ssh ruser= rhost=8.8.8.8  user=root\\=";
+        String[] exp = {"dvc", "ip-172-30-2-212 ", "cfp2", "90.01", "cfp2Label", "SomeFloat= ", "spt", "22", "cs2", "ip-172-30-2-212->/var/log/auth.log", "cs2Label", "Location", "msg", "=Have some =escaped= equals!=", "logname", "", "uid", "0", "euid", "0",  "tty", "ssh", "ruser", "", "rhost", "8.8.8.8 ", "user", "root="};
+        ArrayList<String> expected = new ArrayList<String>(Arrays.asList(exp));
+        ArrayList<String> result = CEFFieldsParser.fieldSplit(input);
+        assertEquals(expected, result);
+    }
 }

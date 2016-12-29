@@ -7,29 +7,85 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.ArrayList;
 
 public class CEFFieldsParser {
-
     private static final Logger LOG = LoggerFactory.getLogger(CEFFieldsParser.class);
 
-    /*
-     * According to the CEF specification this SHOULD work. I have a feeling it will not
-     * cover all implementations but then I also only have one set of example messages.
-     */
-    private static final Pattern KEYVALUE_PATTERN = Pattern.compile("(\\w+)=(.*?(?=\\s\\w+=|$))");
+    //Splits fields string into a vector of:
+    //key, value, key, value, key, value
+    //To be assembled into a dict later.
+    public static ArrayList<String> fieldSplit(String in){
+        boolean escaped = false;
+        ArrayList<String> tokens = new ArrayList<String>();
+        StringBuilder curr = new StringBuilder();
+        
+        String currentKey = "";
+        
+        for (int i = 0; i < in.length(); i++){
+            char c = in.charAt(i);
+            
+            if (escaped){
+                escaped = false;
+                switch (c){
+                case '\\':
+                    curr.append('\\');
+                    break;
+                case '=':
+                    curr.append('=');
+                    break;
+                default:
+                    //Found a character which should not be escaped.
+                    tokens = new ArrayList<String>();
+                    tokens.add("ERROR");
+                    return tokens;
+                }
+                
+            } else {
+                switch (c){
+                case '\\':
+                    escaped = true;
+                    break;
+                case '=':
+                    //This means that the preceding characters were the name of a key, and the next characters will be the value.
+                    String preceding = curr.toString();
+                    int spaceIndex = preceding.lastIndexOf(' ');
+
+                    //If this is the first key, there will be no previous spaces.
+                    if (spaceIndex == -1){
+                        //This was the first keyname. There are no spaces, so the whole thing is a key.
+                        currentKey = preceding;
+                    } else {
+                        //preceding contains a value, a space, then a key. Split the value and key.
+                        String currentValue = preceding.substring(0, spaceIndex);
+                        
+                        tokens.add(currentKey);
+                        tokens.add(currentValue);
+                        
+                        currentKey = preceding.substring(spaceIndex+1, preceding.length());
+                    }
+                    
+                    curr = new StringBuilder();
+                    break;
+                default:
+                    curr.append(c);
+                }
+            }
+        }
+        
+        tokens.add(currentKey);
+        tokens.add(curr.toString());
+        
+        return tokens;
+    }
 
     public ImmutableMap<String, Object> parse(String x) {
-        Matcher m = KEYVALUE_PATTERN.matcher(x);
+        ArrayList<String> keysAndValues = fieldSplit(x);
 
         // Parse out all fields into a map.
         ImmutableMap.Builder<String, String> fieldsBuilder = new ImmutableMap.Builder<>();
-        while(m.find()) {
-            if (m.groupCount() == 2) {
-                fieldsBuilder.put(m.group(1), m.group(2));
-            } else {
-                LOG.debug("Unexpected group count for fields pattern in CEF message. Skipping.");
-                return null;
-            }
+        for(int i = 0; i < keysAndValues.size() -1; i = i + 2){
+            fieldsBuilder.put(keysAndValues.get(i), keysAndValues.get(i+1));
         }
 
         ImmutableMap<String, String> fields;
@@ -104,6 +160,8 @@ public class CEFFieldsParser {
                     case "spid":
                     case "spt":
                     case "type":
+                    case "uid":
+                    case "euid":
                         resultBuilder.put(field.getKey(), Integer.valueOf(field.getValue()));
                         break;
 
